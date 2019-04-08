@@ -73,6 +73,10 @@ criterion = nn.CrossEntropyLoss()
 # Network architecture.
 if args.net == 'standard_mlp':
     net = StandardMLP()
+net.to(args.device)
+
+if args.device == 'cuda':
+    net = torch.nn.DataParallel(net)
 
 # Optimizer.
 if args.optimizer == 'sgd':
