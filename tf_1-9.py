@@ -25,7 +25,6 @@ def train(data, labels, sess, inputs, input_labels,
         batch_idx = i // batch_size
         idx = indices[i:i+batch_size]
         X, y = data[idx], labels[idx]
-        X = 2.0 * X - 1.0
         batch_loss, preds, _ = sess.run([loss, outputs, trainer],
                                          feed_dict={inputs: X, input_labels: y})
 
@@ -48,7 +47,6 @@ def test(data, labels, sess, inputs, input_labels,
         batch_idx = i // batch_size
         start, end = i, min(i + batch_size, len(data))
         X, y = data[start:end], labels[start:end]
-        X = 2.0 * X - 1.0
         batch_loss, preds = sess.run([loss, outputs],
                                      feed_dict={inputs: X, input_labels: y})
 
@@ -61,9 +59,21 @@ def test(data, labels, sess, inputs, input_labels,
         progress_bar(batch_idx, num_iters, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
             % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
+# Model Definitions.
 def standard_mlp(inputs):
     x = tf.reshape(inputs, [-1, 28 * 28])
     x = tf.layers.dense(x, 200, activation=tf.nn.relu)
+    x = tf.layers.dense(x, 10)
+    return x
+
+def lenet(inputs):
+    x = tf.reshape(inputs, [-1, 28, 28, 1])
+    x = tf.layers.conv2d(x, 20, 5)
+    x = tf.layers.max_pooling2d(x, 2, 2)
+    x = tf.layers.conv2d(x, 50, 5)
+    x = tf.layers.max_pooling2d(x, 2, 2)
+    x = tf.reshape(x, [-1, 4*4*50])
+    x = tf.layers.dense(x, 500, activation=tf.nn.relu)
     x = tf.layers.dense(x, 10)
     return x
 
@@ -73,6 +83,8 @@ input_labels = tf.placeholder(tf.float32, [None, 10])
 # Network architecture.
 if args.net == 'standard_mlp':
     outputs = standard_mlp(inputs)
+elif args.net == 'lenet':
+    outputs = lenet(inputs)
 
 # Optimizer.
 if args.optimizer == 'sgd':
@@ -84,6 +96,8 @@ elif args.optimizer == 'adam':
 from utils import get_MNIST
 data, labels, test_data, test_labels = get_MNIST()
 data, test_data = data.reshape(-1, 28, 28), test_data.reshape(-1, 28, 28)
+data = 2.0 * data - 1.0
+test_data = 2.0 * test_data - 1.0
 
 loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=input_labels,
                                                   logits=outputs)

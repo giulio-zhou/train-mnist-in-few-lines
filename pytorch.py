@@ -56,6 +56,7 @@ def test(net, criterion, device, dataset_loader):
             progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                 % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
+# Model definitions.
 class StandardMLP(nn.Module):
     def __init__(self):
         super(StandardMLP, self).__init__()
@@ -68,11 +69,31 @@ class StandardMLP(nn.Module):
         out = self.fc2(out)
         return out
 
-criterion = nn.CrossEntropyLoss()
+class LeNet(nn.Module):
+    def __init__(self):
+        super(LeNet, self).__init__()
+        self.conv1 = nn.Conv2d(1, 20, 5)
+        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.conv2 = nn.Conv2d(20, 50, 5)
+        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.fc1 = nn.Linear(4*4*50, 500)
+        self.fc2 = nn.Linear(500, 10)
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.pool1(out)
+        out = self.conv2(out)
+        out = self.pool2(out)
+        out = out.view(x.size(0), -1)
+        out = F.relu(self.fc1(out))
+        out = self.fc2(out)
+        return out
 
 # Network architecture.
 if args.net == 'standard_mlp':
     net = StandardMLP()
+elif args.net == 'lenet':
+    net = LeNet()
 net.to(args.device)
 
 if args.device == 'cuda':
@@ -106,8 +127,8 @@ trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size,
                                           shuffle=True, num_workers=2)
 testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False,
                                          num_workers=2)
-
 # Train.
+criterion = nn.CrossEntropyLoss()
 for epoch in range(args.num_epochs):
     print('Epoch %d' % epoch)
     train(net, optimizer, criterion, args.device, trainloader)

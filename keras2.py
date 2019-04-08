@@ -4,6 +4,7 @@ import numpy as np
 from keras import optimizers
 from keras.layers import Flatten, Reshape
 from keras.layers import Input, Dense, Activation
+from keras.layers import Conv2D, MaxPool2D
 from keras.models import Model, Sequential
 
 parser = argparse.ArgumentParser()
@@ -15,6 +16,13 @@ parser.add_argument('--batch_size', default=128, type=int)
 parser.add_argument('--net', default='standard_mlp')
 args = parser.parse_args()
 
+def train(model, data, labels, batch_size):
+    model.fit(data, labels, epochs=1, batch_size=batch_size)
+
+def test(model, data, labels, batch_size):
+    print(model.evaluate(data, labels, batch_size=batch_size))
+
+# Model definitions.
 def standard_mlp():
     model = Sequential()
     model.add(Flatten())
@@ -24,15 +32,25 @@ def standard_mlp():
     model.add(Activation('softmax'))
     return model
 
-def train(model, data, labels, batch_size):
-    model.fit(data, labels, epochs=1, batch_size=batch_size)
-
-def test(model, data, labels, batch_size):
-    print(model.evaluate(data, labels, batch_size=batch_size))
+def lenet():
+    model = Sequential()
+    model.add(Reshape((28, 28, 1), input_shape=(28, 28)))
+    model.add(Conv2D(20, 5))
+    model.add(MaxPool2D(2, 2))
+    model.add(Conv2D(50, 5))
+    model.add(MaxPool2D(2, 2))
+    model.add(Flatten())
+    model.add(Dense(units=500))
+    model.add(Activation('relu'))
+    model.add(Dense(units=10))
+    model.add(Activation('softmax'))
+    return model
 
 # Network architecture.
 if args.net == 'standard_mlp':
     model = standard_mlp()
+elif args.net == 'lenet':
+    model = lenet()
 
 # Dataset.
 from utils import get_MNIST
