@@ -12,6 +12,50 @@ import math
 import torch.nn as nn
 import torch.nn.init as init
 
+import gzip
+import numpy as np
+import requests
+import shutil
+import struct
+
+def download(fname):
+    if not os.path.exists(fname):
+        print("Downloading: {}".format(fname))
+        gz_fname = fname + '.gz'
+        url = 'http://yann.lecun.com/exdb/mnist/'+gz_fname
+        with requests.get(url) as response, open(gz_fname, 'wb') as f:
+            f.write(response.content)
+        with gzip.open(gz_fname, 'rb') as f_in:
+            with open(fname, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+
+def get_MNIST():
+    fnames = ["train-images-idx3-ubyte", "train-labels-idx1-ubyte",
+              "t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte"]
+    for fname in fnames:
+        download(fname)
+    X_train = parse_images("train-images-idx3-ubyte")
+    y_train = parse_labels("train-labels-idx1-ubyte")
+    X_test = parse_images("t10k-images-idx3-ubyte")
+    y_test = parse_labels("t10k-labels-idx1-ubyte")
+    return X_train, y_train, X_test, y_test
+
+def parse_images(filename):
+    f = open(filename,"rb");
+    magic,size = struct.unpack('>ii', f.read(8))
+    sx,sy = struct.unpack('>ii', f.read(8))
+    X = []
+    for i in range(size):
+        im =  struct.unpack('B'*(sx*sy), f.read(sx*sy))
+        X.append([float(x)/255.0 for x in im]);
+    return np.array(X);
+
+def parse_labels(filename):
+    one_hot = lambda x, K: np.array(x[:,None] == np.arange(K)[None, :],
+                                    dtype=np.float64)
+    f = open(filename,"rb");
+    magic,size = struct.unpack('>ii', f.read(8))
+    return one_hot(np.array(struct.unpack('B'*size, f.read(size))), 10)
 
 def get_mean_and_std(dataset):
     '''Compute the mean and std value of dataset.'''
