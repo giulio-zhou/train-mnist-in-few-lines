@@ -15,6 +15,7 @@ parser.add_argument('--optimizer', default='sgd')
 parser.add_argument('--num_epochs', default=20, type=int)
 parser.add_argument('--batch_size', default=128, type=int)
 parser.add_argument('--net', default='standard_mlp')
+parser.add_argument('--num_workers', default=8, type=int)
 args = parser.parse_args()
 
 def train(net, optimizer, criterion, device, dataset_loader):
@@ -108,6 +109,7 @@ elif args.optimizer == 'adam':
 
 # Preprocessing.
 transform_train = transforms.Compose([
+    transforms.RandomCrop(28, padding=4),
     transforms.ToTensor(),
     transforms.Normalize((0.5,), (0.5,)),
 ])
@@ -124,9 +126,9 @@ testset = torchvision.datasets.MNIST('pytorch_mnist', train=False,
                                      transform=transform_test, download=True)
     
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size,
-                                          shuffle=True, num_workers=2)
+                                          shuffle=True, num_workers=args.num_workers)
 testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False,
-                                         num_workers=2)
+                                         num_workers=args.num_workers)
 # Train.
 criterion = nn.CrossEntropyLoss()
 for epoch in range(args.num_epochs):

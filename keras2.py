@@ -6,6 +6,7 @@ from keras.layers import Flatten, Reshape
 from keras.layers import Input, Dense, Activation
 from keras.layers import Conv2D, MaxPool2D
 from keras.models import Model, Sequential
+from keras.preprocessing.image import ImageDataGenerator
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', default='cuda')
@@ -14,19 +15,14 @@ parser.add_argument('--optimizer', default='sgd')
 parser.add_argument('--num_epochs', default=20, type=int)
 parser.add_argument('--batch_size', default=128, type=int)
 parser.add_argument('--net', default='standard_mlp')
+parser.add_argument('--num_workers', default=8, type=int)
 args = parser.parse_args()
-
-def train(model, data, labels, batch_size):
-    model.fit(data, labels, epochs=1, batch_size=batch_size)
-
-def test(model, data, labels, batch_size):
-    print(model.evaluate(data, labels, batch_size=batch_size))
 
 # Model definitions.
 def standard_mlp():
     model = Sequential()
-    model.add(Flatten())
-    model.add(Dense(units=200, input_dim=28*28))
+    model.add(Reshape((28*28,), input_shape=(28, 28, 1)))
+    model.add(Dense(units=200))
     model.add(Activation('relu'))
     model.add(Dense(units=10))
     model.add(Activation('softmax'))
@@ -34,8 +30,7 @@ def standard_mlp():
 
 def lenet():
     model = Sequential()
-    model.add(Reshape((28, 28, 1), input_shape=(28, 28)))
-    model.add(Conv2D(20, 5))
+    model.add(Conv2D(20, 5, input_shape=(28, 28, 1)))
     model.add(MaxPool2D(2, 2))
     model.add(Conv2D(50, 5))
     model.add(MaxPool2D(2, 2))
@@ -55,8 +50,27 @@ elif args.net == 'lenet':
 # Dataset.
 from utils import get_MNIST
 data, labels, test_data, test_labels = get_MNIST()
-data, test_data = data.reshape(-1, 28, 28), test_data.reshape(-1, 28, 28)
-data, test_data = 2.0 * data - 1.0, 2.0 * test_data - 1.0
+data, test_data = data.reshape(-1, 28, 28, 1), test_data.reshape(-1, 28, 28, 1)
+
+# Preprocessing.
+def train_fn(x):
+    # Keras does not have an implementation of random cropping.
+    def random_crop(img, random_crop_size):
+        height, width = img.shape[0], img.shape[1]
+        dy, dx = random_crop_size
+        x = np.random.randint(0, width - dx + 1)
+        y = np.random.randint(0, height - dy + 1)
+        return img[y:y+dy, x:x+dx]
+    x = 2.0 * x - 1.0
+    x = np.pad(x, ((4, 4), (4, 4), (0, 0)), 'constant')
+    x = random_crop(x, (28, 28))
+    return x
+def test_fn(x):
+    return 2.0 * x - 1.0
+train_datagen = ImageDataGenerator(preprocessing_function=train_fn).flow(
+    data, labels, args.batch_size)
+test_datagen = ImageDataGenerator(preprocessing_function=test_fn).flow(
+    test_data, test_labels, args.batch_size)
 
 # Optimizer.
 if args.optimizer == 'sgd':
@@ -67,7 +81,6 @@ elif args.optimizer == 'adam':
 loss = 'categorical_crossentropy'
 metrics = ['accuracy']
 model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
-for epoch in range(args.num_epochs):
-    print('Epoch %d' % epoch)
-    train(model, data, labels, args.batch_size)
-    test(model, test_data, test_labels, args.batch_size)
+model.fit_generator(train_datagen, epochs=args.num_epochs,
+                    validation_data=test_datagen,
+                    workers=args.num_workers, use_multiprocessing=True)
