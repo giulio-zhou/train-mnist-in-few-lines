@@ -57,6 +57,23 @@ elif args.optimizer == 'adam':
     optimizer_fn = lambda lr: tf.train.AdamOptimizer(lr)
 
 # TPUEstimator functions.
+_LR_SCHEDULE = [  # (LR multiplier, epoch to start)
+    # (1.0 / 6, 0), (2.0 / 6, 1), (3.0 / 6, 2), (4.0 / 6, 3), (5.0 / 6, 4),
+    # (1.0, 5), (0.1, 30), (0.01, 60), (0.001, 80), (0.0001, 90)
+    (1.0, 0), (0.1, 60), (0.01, 120)
+]
+
+def learning_rate_schedule(current_epoch):
+  """Handles linear scaling rule, gradual warmup, and LR decay."""
+  scaled_lr = args.lr * (args.batch_size / 128.0)
+
+  decay_rate = scaled_lr
+  for mult, start_epoch in _LR_SCHEDULE:
+    decay_rate = tf.where(current_epoch < start_epoch, decay_rate,
+                          scaled_lr * mult)
+
+  return decay_rate
+
 def make_input_fn(data, labels):
     def input_fn(params):
         def data_aug(img, label):
@@ -79,9 +96,14 @@ def model_fn(features, labels, mode, params):
     loss += params['weight_decay'] * tf.add_n(
       [tf.nn.l2_loss(v) for v in tf.trainable_variables()
        if 'batch_normalization' not in v.name])
-    
-    learning_rate = tf.train.exponential_decay(
-        args.lr, tf.train.get_global_step(), 40*steps_per_epoch, 0.1)
+
+    # LR computation.
+    global_step = tf.train.get_global_step()
+    current_epoch = (
+      tf.cast(global_step, tf.float32) / steps_per_epoch)
+    # learning_rate = tf.train.exponential_decay(
+    #     args.lr, global_step, 60 * steps_per_epoch, 0.1)
+    learning_rate = learning_rate_schedule(current_epoch)
     
     train_op = None
     if mode == tf.estimator.ModeKeys.TRAIN:
@@ -92,9 +114,6 @@ def model_fn(features, labels, mode, params):
     eval_metrics = None
     if mode == tf.estimator.ModeKeys.EVAL:
         # Metrics.
-        global_step = tf.train.get_global_step()
-        current_epoch = (
-          tf.cast(global_step, tf.float32) / steps_per_epoch)
         # TODO: this is a hack to get the LR and epoch for Tensorboard.
         # Reimplement this when TPU training summaries are supported.
         lr_repeat = tf.reshape(
@@ -128,8 +147,7 @@ print(pid, tpu_cluster_resolver.get_master())
 run_config = tf.contrib.tpu.RunConfig(
     cluster=tpu_cluster_resolver,
     model_dir=args.model_dir,
-    # model_dir=FLAGS.model_dir,
-    # save_checkpoints_steps=save_checkpoints_steps,
+    save_checkpoints_steps=None,
     # log_step_count_steps=FLAGS.log_step_count_steps,
     # session_config=tf.ConfigProto(
     #     graph_options=tf.GraphOptions(
