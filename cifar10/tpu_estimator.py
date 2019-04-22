@@ -60,7 +60,7 @@ elif args.optimizer == 'adam':
 def make_input_fn(data, labels):
     def input_fn(params):
         def data_aug(img, label):
-            aug_img = tf.pad(aug_img, [[4, 4], [4, 4], [0, 0]])
+            aug_img = tf.pad(img, [[4, 4], [4, 4], [0, 0]])
             aug_img = tf.random_crop(aug_img, [32, 32, 3])
             aug_img = tf.image.random_flip_left_right(aug_img)
             return aug_img, label
