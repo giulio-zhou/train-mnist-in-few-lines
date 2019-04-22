@@ -1,20 +1,26 @@
 import argparse
 import numpy as np
+import os
 import tensorflow as tf
 from keras.datasets import cifar10
 from resnet_model_tpu import resnet_v1
+from tensorflow.contrib.tpu.python.tpu import async_checkpoint
+from tensorflow.contrib.training.python.training import evaluation
 from tensorflow.core.protobuf import rewriter_config_pb2
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', default='cuda')
 parser.add_argument('--lr', default=0.01, type=float)
+parser.add_argument('--weight_decay', default=5e-4, type=float)
 parser.add_argument('--optimizer', default='sgd')
 parser.add_argument('--num_epochs', default=20, type=int)
 parser.add_argument('--eval_interval', default=1, type=int)
 parser.add_argument('--batch_size', default=128, type=int)
 parser.add_argument('--net', default='standard_mlp')
 parser.add_argument('--model_dir', required=True)
+parser.add_argument('--num_shards', default=8, type=int)
 parser.add_argument('--tpu_name', required=True)
+parser.add_argument('--tpu_name_eval')
 parser.add_argument('--tpu_zone', default='us-central1-f')
 args = parser.parse_args()
 
@@ -42,6 +48,7 @@ labels = labels[:, 0].astype(np.int32)
 test_labels = test_labels[:, 0].astype(np.int32)
 steps_per_epoch = (len(data) // args.batch_size) + \
                   int((len(data) % args.batch_size) > 0)
+iterations_per_loop = args.eval_interval * steps_per_epoch
 
 # Optimizer.
 if args.optimizer == 'sgd':
@@ -50,17 +57,17 @@ elif args.optimizer == 'adam':
     optimizer_fn = lambda lr: tf.train.AdamOptimizer(lr)
 
 # TPUEstimator functions.
-def make_input_fn(data, labels, batch_size):
+def make_input_fn(data, labels):
     def input_fn(params):
         def data_aug(img, label):
-            aug_img = tf.pad(img, [[4, 4], [4, 4], [0, 0]])
-            aug_img = tf.random_crop(img, [32, 32, 3])
+            aug_img = tf.pad(aug_img, [[4, 4], [4, 4], [0, 0]])
+            aug_img = tf.random_crop(aug_img, [32, 32, 3])
             aug_img = tf.image.random_flip_left_right(aug_img)
             return aug_img, label
         dataset = tf.data.Dataset.from_tensor_slices((data, labels))
         dataset = dataset.shuffle(50000).repeat()
         dataset = dataset.map(data_aug)
-        dataset = dataset.batch(batch_size, drop_remainder=True)
+        dataset = dataset.batch(params['batch_size'], drop_remainder=True)
         return dataset
     return input_fn
     
@@ -69,6 +76,9 @@ def model_fn(features, labels, mode, params):
     onehot_labels = tf.one_hot(indices=tf.cast(labels, tf.int32), depth=10)
     loss = tf.losses.softmax_cross_entropy(
         onehot_labels=onehot_labels, logits=logits)
+    loss += params['weight_decay'] * tf.add_n(
+      [tf.nn.l2_loss(v) for v in tf.trainable_variables()
+       if 'batch_normalization' not in v.name])
     
     learning_rate = tf.train.exponential_decay(
         args.lr, tf.train.get_global_step(), 40*steps_per_epoch, 0.1)
@@ -77,7 +87,7 @@ def model_fn(features, labels, mode, params):
     if mode == tf.estimator.ModeKeys.TRAIN:
         optimizer = optimizer_fn(learning_rate)
         optimizer = tf.contrib.tpu.CrossShardOptimizer(optimizer)
-        train_op = opt.minimize(loss, global_step=tf.train.get_global_step())
+        train_op = optimizer.minimize(loss, global_step=tf.train.get_global_step())
 
     eval_metrics = None
     if mode == tf.estimator.ModeKeys.EVAL:
@@ -106,8 +116,14 @@ def model_fn(features, labels, mode, params):
                                            train_op=train_op,
                                            eval_metrics=eval_metrics)
 
-tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
-    args.tpu_name, zone=args.tpu_zone)
+pid = os.fork()
+if pid > 0 or (args.tpu_name_eval is None):
+    tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
+        args.tpu_name, zone=args.tpu_zone)
+else:
+    tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
+        args.tpu_name_eval, zone=args.tpu_zone)
+print(pid, tpu_cluster_resolver.get_master())
 
 run_config = tf.contrib.tpu.RunConfig(
     cluster=tpu_cluster_resolver,
@@ -121,23 +137,35 @@ run_config = tf.contrib.tpu.RunConfig(
     #             disable_meta_optimizer=True))),
     tpu_config=tf.contrib.tpu.TPUConfig(
         iterations_per_loop=steps_per_epoch,
-        num_shards=8))
-        # per_host_input_for_training=tf.contrib.tpu.InputPipelineConfig
-        # .PER_HOST_V2))  # pylint: disable=line-too-long
+        num_shards=args.num_shards,
+        per_host_input_for_training=tf.contrib.tpu.InputPipelineConfig
+        .PER_HOST_V2))  # pylint: disable=line-too-long
 
+params = dict(weight_decay=args.weight_decay)
 tpu_estimator = tf.contrib.tpu.TPUEstimator(
     model_fn=model_fn,
+    config=run_config,
     train_batch_size=args.batch_size,
     eval_batch_size=args.batch_size,
-    config=run_config)
+    params=params)
 
-train_input_fn = make_input_fn(data, labels, args.batch_size)
-eval_input_fn = make_input_fn(test_data, test_labels, args.batch_size)
-for i in range(0, args.num_epochs, args.eval_interval):
-    print('train')
+hooks = []
+hooks.append(
+    async_checkpoint.AsyncCheckpointSaverHook(
+        checkpoint_dir=args.model_dir,
+        save_steps=iterations_per_loop))
+
+train_input_fn = make_input_fn(data, labels)
+eval_input_fn = make_input_fn(test_data, test_labels)
+
+if pid > 0:
     tpu_estimator.train(input_fn=train_input_fn,
-                        steps=steps_per_epoch * args.eval_interval)
-    print('eval')
-    eval_results = tpu_estimator.evaluate(
-        input_fn=eval_input_fn, steps=len(test_data) // args.batch_size)
-    print("Eval results: %s" % eval_results)
+                        steps=args.num_epochs * steps_per_epoch,
+                        hooks=hooks)
+else:
+    for ckpt in evaluation.checkpoints_iterator(args.model_dir):
+        eval_results = tpu_estimator.evaluate(
+            input_fn=eval_input_fn,
+            steps=len(test_data) // args.batch_size,
+            checkpoint_path=ckpt)
+        print("Eval results: %s" % eval_results)
