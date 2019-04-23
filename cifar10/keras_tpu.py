@@ -8,7 +8,6 @@ from keras.preprocessing.image import ImageDataGenerator
 from resnet_model import ResNet50
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--device', default='cuda')
 parser.add_argument('--lr', default=0.01, type=float)
 parser.add_argument('--optimizer', default='sgd')
 parser.add_argument('--num_epochs', default=20, type=int)

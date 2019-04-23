@@ -10,7 +10,6 @@ from tensorflow.contrib.training.python.training import evaluation
 from tensorflow.core.protobuf import rewriter_config_pb2
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--device', default='cuda')
 parser.add_argument('--lr', default=0.01, type=float)
 parser.add_argument('--weight_decay', default=5e-4, type=float)
 parser.add_argument('--optimizer', default='sgd')
@@ -35,8 +34,6 @@ def standard_mlp(features):
 # Network architecture.
 if args.net == 'standard_mlp':
     net_fn = standard_mlp
-elif args.net == 'lenet':
-    net_fn = lenet
 elif args.net.startswith('resnet'):
     num_layers = int(args.net.lstrip('resnet'))
     network = resnet_v1(num_layers, 10, 'channels_last')
