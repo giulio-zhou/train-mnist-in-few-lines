@@ -2,6 +2,7 @@ import argparse
 import numpy as np
 import os
 import tensorflow as tf
+import time
 from keras.datasets import cifar10
 from resnet_model_tpu import resnet_v1
 from tensorflow.contrib.tpu.python.tpu import async_checkpoint
@@ -36,8 +37,9 @@ if args.net == 'standard_mlp':
     net_fn = standard_mlp
 elif args.net == 'lenet':
     net_fn = lenet
-elif args.net == 'resnet50':
-    network = resnet_v1(50, 10, 'channels_last')
+elif args.net.startswith('resnet'):
+    num_layers = int(args.net.lstrip('resnet'))
+    network = resnet_v1(num_layers, 10, 'channels_last')
     net_fn = lambda x: network(inputs=x, is_training=True)
 
 # Dataset.
@@ -60,7 +62,7 @@ elif args.optimizer == 'adam':
 _LR_SCHEDULE = [  # (LR multiplier, epoch to start)
     # (1.0 / 6, 0), (2.0 / 6, 1), (3.0 / 6, 2), (4.0 / 6, 3), (5.0 / 6, 4),
     # (1.0, 5), (0.1, 30), (0.01, 60), (0.001, 80), (0.0001, 90)
-    (1.0, 0), (0.1, 60), (0.01, 120)
+    (1.0, 0), (0.1, 150), (0.01, 250)
 ]
 
 def learning_rate_schedule(current_epoch):
@@ -180,6 +182,8 @@ if pid > 0:
     tpu_estimator.train(input_fn=train_input_fn,
                         steps=args.num_epochs * steps_per_epoch,
                         hooks=hooks)
+    # Sleep so that eval can finish before closing.
+    time.sleep(360)
 else:
     for ckpt in evaluation.checkpoints_iterator(args.model_dir):
         eval_results = tpu_estimator.evaluate(
