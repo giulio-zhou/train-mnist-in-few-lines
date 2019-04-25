@@ -59,7 +59,8 @@ elif args.optimizer == 'adam':
 _LR_SCHEDULE = [  # (LR multiplier, epoch to start)
     # (1.0 / 6, 0), (2.0 / 6, 1), (3.0 / 6, 2), (4.0 / 6, 3), (5.0 / 6, 4),
     # (1.0, 5), (0.1, 30), (0.01, 60), (0.001, 80), (0.0001, 90)
-    (1.0, 0), (0.1, 150), (0.01, 250)
+    # (1.0, 0), (0.1, 150), (0.01, 250)
+    (1.0, 0), (0.1, 1200), (0.01, 2000)
 ]
 
 def learning_rate_schedule(current_epoch):
@@ -90,8 +91,17 @@ def make_input_fn(data, labels):
 def model_fn(features, labels, mode, params):
     logits = net_fn(features)
     onehot_labels = tf.one_hot(indices=tf.cast(labels, tf.int32), depth=10)
+    # loss = tf.losses.softmax_cross_entropy(
+    #     onehot_labels=onehot_labels, logits=logits)
+    l2_dist = tf.linalg.norm(onehot_labels - tf.nn.softmax(logits),
+                             ord=2, axis=1)
+    prob = tf.maximum(l2_dist / 2**0.5, 0.125)
+    prob = tf.stop_gradient(prob)
+    mask = tf.cumsum(prob) <= (0.125 * params['batch_size'])
     loss = tf.losses.softmax_cross_entropy(
-        onehot_labels=onehot_labels, logits=logits)
+        onehot_labels=onehot_labels, logits=logits,
+        weights=tf.stop_gradient(l2_dist * tf.cast(mask, tf.float32)))
+
     loss += params['weight_decay'] * tf.add_n(
       [tf.nn.l2_loss(v) for v in tf.trainable_variables()
        if 'batch_normalization' not in v.name])
@@ -121,14 +131,16 @@ def model_fn(features, labels, mode, params):
         ce_repeat = tf.reshape(
             tf.tile(tf.expand_dims(current_epoch, 0),
                     [params['batch_size'],]), [params['batch_size'], 1])
-        def metric_fn(labels, logits, lr_repeat, ce_repeat):
+        def metric_fn(labels, logits, lr_repeat, ce_repeat, mask):
             """Evaluation metric fn. Performed on CPU, do not reference TPU ops."""
             predictions = tf.argmax(logits, axis=1)
             accuracy = tf.metrics.accuracy(labels, predictions)
             lr = tf.metrics.mean(lr_repeat)
             ce = tf.metrics.mean(ce_repeat)
-            return {"accuracy": accuracy, "learning_rate": lr, "current_epoch": ce}
-        eval_metrics = (metric_fn, [labels, logits, lr_repeat, ce_repeat])
+            nb = tf.metrics.mean(mask)
+            return {"accuracy": accuracy, "learning_rate": lr, "current_epoch": ce,
+                    "num_backpropped": nb}
+        eval_metrics = (metric_fn, [labels, logits, lr_repeat, ce_repeat, mask])
 
     return tf.contrib.tpu.TPUEstimatorSpec(mode=mode, loss=loss,
                                            train_op=train_op,
