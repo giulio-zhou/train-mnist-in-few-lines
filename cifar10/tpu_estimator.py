@@ -4,6 +4,7 @@ import os
 import tensorflow as tf
 import time
 from keras.datasets import cifar10
+from mobilenet.mobilenet_v2 import mobilenet as mobilenet_v2
 from resnet_model_tpu import resnet_v1
 from tensorflow.contrib.tpu.python.tpu import async_checkpoint
 from tensorflow.contrib.training.python.training import evaluation
@@ -34,6 +35,8 @@ def standard_mlp(features):
 # Network architecture.
 if args.net == 'standard_mlp':
     net_fn = standard_mlp
+elif args.net == 'mobilenet_v2':
+    net_fn = lambda x: mobilenet_v2(x, 10, is_training=True)[0]
 elif args.net.startswith('resnet'):
     num_layers = int(args.net.lstrip('resnet'))
     network = resnet_v1(num_layers, 10, 'channels_last')
