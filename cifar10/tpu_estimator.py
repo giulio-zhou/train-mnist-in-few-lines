@@ -26,28 +26,14 @@ parser.add_argument('--tpu_name_eval')
 parser.add_argument('--tpu_zone', default='us-central1-f')
 args = parser.parse_args()
 
-# Model definitions.
-def standard_mlp(features):
-    input_layer = tf.reshape(features, [-1, 32*32*3])
-    fc1 = tf.layers.dense(inputs=input_layer, units=200, activation=tf.nn.relu)
-    logits = tf.layers.dense(inputs=fc1, units=10)
-    return logits
-
-# Network architecture.
-if args.net == 'standard_mlp':
-    net_fn = standard_mlp
-elif args.net == 'mobilenet_v2':
-    net_fn = lambda x: mobilenet_v2(x, 10, is_training=True)[0]
-elif args.net.startswith('resnet'):
-    num_layers = int(args.net.lstrip('resnet'))
-    network = resnet_v1(num_layers, 10, 'channels_last')
-    net_fn = lambda x: network(inputs=x, is_training=True)
-
 # Dataset.
 if args.dataset == 'cifar10':
     (data, labels), (test_data, test_labels) = cifar10.load_data()
+    num_classes = 10
 elif args.dataset == 'cifar100':
     (data, labels), (test_data, test_labels) = cifar100.load_data(label_mode='fine')
+    num_classes = 100
+print(data, labels)
 data, test_data = 2.0 * (data / 255.) - 1.0, 2.0 * (test_data / 255.) - 1.0
 data, test_data = data.astype(np.float32), test_data.astype(np.float32)
 labels = labels[:, 0].astype(np.int32)
@@ -55,6 +41,23 @@ test_labels = test_labels[:, 0].astype(np.int32)
 steps_per_epoch = (len(data) // args.batch_size) + \
                   int((len(data) % args.batch_size) > 0)
 iterations_per_loop = args.eval_interval * steps_per_epoch
+
+# Model definitions.
+def standard_mlp(features):
+    input_layer = tf.reshape(features, [-1, 32*32*3])
+    fc1 = tf.layers.dense(inputs=input_layer, units=200, activation=tf.nn.relu)
+    logits = tf.layers.dense(inputs=fc1, units=num_classes)
+    return logits
+
+# Network architecture.
+if args.net == 'standard_mlp':
+    net_fn = standard_mlp
+elif args.net == 'mobilenet_v2':
+    net_fn = lambda x: mobilenet_v2(x, num_classes, is_training=True)[0]
+elif args.net.startswith('resnet'):
+    num_layers = int(args.net.lstrip('resnet'))
+    network = resnet_v1(num_layers, num_classes, 'channels_last')
+    net_fn = lambda x: network(inputs=x, is_training=True)
 
 # Optimizer.
 if args.optimizer == 'sgd':
@@ -96,7 +99,8 @@ def make_input_fn(data, labels):
     
 def model_fn(features, labels, mode, params):
     logits = net_fn(features)
-    onehot_labels = tf.one_hot(indices=tf.cast(labels, tf.int32), depth=10)
+    onehot_labels = tf.one_hot(indices=tf.cast(labels, tf.int32),
+                               depth=num_classes)
     loss = tf.losses.softmax_cross_entropy(
         onehot_labels=onehot_labels, logits=logits)
     loss += params['weight_decay'] * tf.add_n(
