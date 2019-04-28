@@ -3,7 +3,7 @@ import numpy as np
 import os
 import tensorflow as tf
 import time
-from keras.datasets import cifar10
+from keras.datasets import cifar10, cifar100
 from mobilenet.mobilenet_v2 import mobilenet as mobilenet_v2
 from resnet_model_tpu import resnet_v1
 from tensorflow.contrib.tpu.python.tpu import async_checkpoint
@@ -17,6 +17,7 @@ parser.add_argument('--optimizer', default='sgd')
 parser.add_argument('--num_epochs', default=20, type=int)
 parser.add_argument('--eval_interval', default=1, type=int)
 parser.add_argument('--batch_size', default=128, type=int)
+parser.add_argument('--dataset', default='cifar10')
 parser.add_argument('--net', default='standard_mlp')
 parser.add_argument('--model_dir', required=True)
 parser.add_argument('--num_shards', default=8, type=int)
@@ -43,7 +44,10 @@ elif args.net.startswith('resnet'):
     net_fn = lambda x: network(inputs=x, is_training=True)
 
 # Dataset.
-(data, labels), (test_data, test_labels) = cifar10.load_data()
+if args.dataset == 'cifar10':
+    (data, labels), (test_data, test_labels) = cifar10.load_data()
+elif args.dataset == 'cifar100':
+    (data, labels), (test_data, test_labels) = cifar100.load_data(label_mode='fine')
 data, test_data = 2.0 * (data / 255.) - 1.0, 2.0 * (test_data / 255.) - 1.0
 data, test_data = data.astype(np.float32), test_data.astype(np.float32)
 labels = labels[:, 0].astype(np.int32)
