@@ -60,12 +60,13 @@ print(train_len, val_len, steps_per_epoch, iterations_per_loop)
 def small(features, initial_state=None):
     batch_size = tf.shape(features)[0]
     all_logits = []
-    lstm = tf.contrib.rnn.BasicLSTMCell(200)
+    lstm = tf.keras.layers.LSTMCell(200)
     embedding = tf.get_variable(
         "embedding", [args.vocab_size, 200], dtype=tf.float32)
-    softmax_w = tf.layers.Dense(args.vocab_size)
+    softmax_w = tf.keras.layers.Dense(args.vocab_size)
     if initial_state is None:
-        initial_state = state = lstm.zero_state(batch_size, dtype=tf.float32)
+        initial_state = state = lstm.get_initial_state(batch_size=batch_size,
+                                                       dtype=tf.float32)
     for i in range(args.num_steps):
         inputs = tf.nn.embedding_lookup(embedding, features[:, i])
         output, state = lstm(inputs, state)
